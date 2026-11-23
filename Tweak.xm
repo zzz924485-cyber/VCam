@@ -9,7 +9,6 @@
 // ============================================================================
 
 static BOOL g_vcamEnabled = NO;
-static BOOL g_frontOnly = YES; // 默认开启：仅替换前置摄像头，后置保持真机画面
 static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
 
@@ -99,13 +98,9 @@ static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
 
     [g_overlayWindow makeKeyAndVisible];
 
-    NSString *statusMsg = [NSString stringWithFormat:@"状态: %@ | 模式: %@",
-        g_vcamEnabled ? @"已启用" : @"已关闭",
-        g_frontOnly ? @"仅替换前置 (后置真机)" : @"前后全部替换"];
-
     UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:@"VCam"
-        message:statusMsg
+        alertControllerWithTitle:@"VCam 虚拟相机"
+        message:g_vcamEnabled ? @"当前状态: 已开启 (全局替换)" : @"当前状态: 已关闭"
         preferredStyle:UIAlertControllerStyleActionSheet];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"选择视频"
@@ -118,11 +113,6 @@ static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
         picker.mediaTypes = @[@"public.movie"];
         picker.delegate = g_pickerDelegate;
         [hostVC presentViewController:picker animated:YES completion:nil];
-    }]];
-
-    [alert addAction:[UIAlertAction actionWithTitle:g_frontOnly ? @"切换为: 前后全部替换" : @"切换为: 仅前置替换 (后置真机)"
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        g_frontOnly = !g_frontOnly;
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机"
@@ -205,23 +195,6 @@ static void setupFloatButton(void) {
 }
 
 // ============================================================================
-// MARK: - 辅助方法：判断当前数据流是否来自前置摄像头
-// ============================================================================
-
-static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
-    if (!connection) return NO;
-    for (AVCaptureInputPort *port in connection.inputPorts) {
-        if ([port.input isKindOfClass:[AVCaptureDeviceInput class]]) {
-            AVCaptureDeviceInput *deviceInput = (AVCaptureDeviceInput *)port.input;
-            if (deviceInput.device.position == AVCaptureDevicePositionFront) {
-                return YES;
-            }
-        }
-    }
-    return NO;
-}
-
-// ============================================================================
 // MARK: - Hook AVCaptureSession / Video Output
 // ============================================================================
 
@@ -247,11 +220,6 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
     if ([output isKindOfClass:[AVCaptureVideoDataOutput class]] &&
         g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
         
-        if (g_frontOnly && !isConnectionFromFrontCamera(connection)) {
-            %orig;
-            return;
-        }
-        
         CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
         if (fakeFrame) {
             %orig(output, fakeFrame, connection);
@@ -271,26 +239,31 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
 %end
 
 %hook AVCaptureVideoPreviewLayer
-• (void)setSession:(AVCaptureSession *)session {
-%orig;
+- (void)setSession:(AVCaptureSession *)session {
+    %orig;
 }
 %end
+
 %end
+
 // ============================================================================
 // MARK: - Constructor
 // ============================================================================
+
 %ctor {
-@autoreleasepool {
-g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-if (![bundleID isEqualToString:@"com.apple.springboard"]) {
-%init(VCamHooks);
-}
-dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-dispatch_get_main_queue(), ^{
-@autoreleasepool {
-setupFloatButton();
-}
-});
-}
+    @autoreleasepool {
+        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
+        
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
+            %init(VCamHooks);
+        }
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
+            dispatch_get_main_queue(), ^{
+                @autoreleasepool {
+                    setupFloatButton();
+                }
+            });
+    }
 }
