@@ -12,27 +12,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fakeroot git perl clang llvm lld libdispatch-dev libssl-dev curl unzip
-
-      - name: Setup Theos & iOS SDK
-        run: |
-          git clone --recursive https://github.com ~/theos
-          mkdir -p ~/theos/sdks
-          curl -L https://github.com -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/*.sdk ~/theos/sdks/
-          rm -rf sdks.zip sdks-master
-
-      - name: Build Rootless DEB
-        env:
-          THEOS: /home/runner/theos
-          THEOS_PACKAGE_SCHEME: rootless
-        run: |
-          make clean || true
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+      - name: Build Tweak with Theos
+        uses: theos/build-action@v1
+        with:
+          arguments: package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
 
       - name: Upload DEB Artifact
         uses: actions/upload-artifact@v4
