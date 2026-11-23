@@ -256,7 +256,7 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
 %end
 
 // Intercept frame delegate callback -> substitute with fake frames
-%hook NSObject
+
 %hook NSObject
 - (void)captureOutput:(AVCaptureOutput *)output 
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
