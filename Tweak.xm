@@ -9,6 +9,7 @@
 // ============================================================================
 
 static BOOL g_vcamEnabled = NO;
+static BOOL g_frontOnly = YES; // 默认开启：仅替换前置摄像头，后置保持真机画面
 static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
 
@@ -57,7 +58,7 @@ static void setupFloatButton() {
         ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9]
         : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
     
-    [g_floatButton setTitle:@"📷" forState:UIStateNormal];
+    [g_floatButton setTitle:@"📷" forState:UIControlStateNormal];
     g_floatButton.titleLabel.font = [UIFont systemFontOfSize:24];
     
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] 
@@ -91,7 +92,6 @@ static void setupFloatButton() {
     [rootVC.view addSubview:g_floatButton];
     g_overlayWindow.rootViewController = rootVC;
     
-    // Register selectors on the button class
     class_addMethod([g_floatButton class], @selector(handlePan:), 
                     (IMP)handlePanGesture, "v@:@");
     class_addMethod([g_floatButton class], @selector(handleTap:), 
@@ -168,9 +168,13 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     UIViewController *topVC = findTopViewController();
     if (!topVC) return;
     
+    NSString *statusMsg = [NSString stringWithFormat:@"状态: %@ | 模式: %@",
+        g_vcamEnabled ? @"已启用" : @"已关闭",
+        g_frontOnly ? @"仅替换前置 (后置真机)" : @"前后全部替换"];
+        
     UIAlertController *alert = [UIAlertController 
         alertControllerWithTitle:@"VCam" 
-        message:g_vcamEnabled ? @"虚拟相机已启用" : @"虚拟相机已关闭"
+        message:statusMsg
         preferredStyle:UIAlertControllerStyleActionSheet];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"选择视频" 
@@ -184,6 +188,11 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         picker.mediaTypes = @[@"public.movie"];
         picker.delegate = g_pickerDelegate;
         [topVC presentViewController:picker animated:YES completion:nil];
+    }]];
+    
+    [alert addAction:[UIAlertAction actionWithTitle:g_frontOnly ? @"切换为: 前后全部替换" : @"切换为: 仅前置替换 (后置真机)"
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        g_frontOnly = !g_frontOnly;
     }]];
     
     [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机" 
@@ -212,6 +221,23 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 }
 
 // ============================================================================
+// MARK: - 辅助方法：判断当前数据流是否来自前置摄像头
+// ============================================================================
+
+static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
+    if (!connection) return NO;
+    for (AVCaptureInputPort *port in connection.inputPorts) {
+        if ([port.input isKindOfClass:[AVCaptureDeviceInput class]]) {
+            AVCaptureDeviceInput *deviceInput = (AVCaptureDeviceInput *)port.input;
+            if (deviceInput.device.position == AVCaptureDevicePositionFront) {
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+// ============================================================================
 // MARK: - Hook AVCaptureSession / Video Output
 // ============================================================================
 
@@ -231,55 +257,3 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 
 // Intercept frame delegate callback -> substitute with fake frames
 %hook NSObject
-- (void)captureOutput:(AVCaptureOutput *)output 
-    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
-           fromConnection:(AVCaptureConnection *)connection {
-    
-    if (g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
-        CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
-        if (fakeFrame) {
-            %orig(output, fakeFrame, connection);
-            CFRelease(fakeFrame);
-            return;
-        }
-    }
-    %orig;
-}
-%end
-
-%hook AVCapturePhotoOutput
-- (void)capturePhotoWithSettings:(AVCapturePhotoSettings *)settings 
-                        delegate:(id<AVCapturePhotoCaptureDelegate>)delegate {
-    %orig;
-}
-%end
-
-%hook AVCaptureVideoPreviewLayer
-- (void)setSession:(AVCaptureSession *)session {
-    %orig;
-}
-%end
-
-%end // VCamHooks group
-
-// ============================================================================
-// MARK: - Constructor
-// ============================================================================
-
-%ctor {
-    @autoreleasepool {
-        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-        
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
-            %init(VCamHooks);
-        }
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
-            dispatch_get_main_queue(), ^{
-                @autoreleasepool {
-                    setupFloatButton();
-                }
-            });
-    }
-}
