@@ -12,21 +12,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Theos, Toolchain & SDK
+      - name: Setup Theos & SDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl fakeroot git perl clang lld unzip xz-utils
+          sudo apt-get install -y curl fakeroot git perl clang lld llvm unzip
           GH="https://github.com"
           git clone --depth=1 --recursive --shallow-submodules "$GH/theos/theos.git" /home/runner/theos
           mkdir -p /home/runner/theos/toolchain/linux/iphone
-          curl -fL "$GH/CRKatri/llvm-project/releases/download/swift-5.3.2-RELEASE/swift-5.3.2-RELEASE-ubuntu20.04.tar.xz" -o toolchain.tar.xz || \
-          curl -fL "$GH/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma" -o toolchain.tar.lzma
-          if [ -f toolchain.tar.xz ]; then
-            tar -xf toolchain.tar.xz -C /home/runner/theos/toolchain/linux/iphone --strip-components=1
-          else
-            tar --lzma -xf toolchain.tar.lzma -C /home/runner/theos/toolchain/linux/iphone
-          fi
-          rm -f toolchain.tar.*
+          ln -s /usr/bin /home/runner/theos/toolchain/linux/iphone/bin
           mkdir -p /home/runner/theos/sdks
           curl -fL "$GH/theos/sdks/archive/refs/heads/master.zip" -o sdks.zip
           unzip -q sdks.zip
