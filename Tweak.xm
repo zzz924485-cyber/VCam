@@ -37,67 +37,6 @@ static UIButton *g_floatButton = nil;
 @implementation VCamFloatButton
 @end
 
-static void setupFloatButton(void);
-static void handlePanGesture(UIPanGestureRecognizer *gesture);
-static void handleTapGesture(UITapGestureRecognizer *gesture);
-
-static void setupFloatButton() {
-    if (g_floatButton) return;
-    
-    CGFloat btnSize = 50;
-    CGRect screen = [UIScreen mainScreen].bounds;
-    
-    g_floatButton = [VCamFloatButton buttonWithType:UIButtonTypeSystem];
-    g_floatButton.frame = CGRectMake(screen.size.width - btnSize - 15, 100, btnSize, btnSize);
-    g_floatButton.layer.cornerRadius = btnSize / 2.0;
-    g_floatButton.layer.shadowColor = [UIColor blackColor].CGColor;
-    g_floatButton.layer.shadowOffset = CGSizeMake(0, 2);
-    g_floatButton.layer.shadowOpacity = 0.3;
-    g_floatButton.layer.shadowRadius = 4;
-    g_floatButton.backgroundColor = g_vcamEnabled 
-        ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9]
-        : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
-    
-    [g_floatButton setTitle:@"📷" forState:UIControlStateNormal];
-    g_floatButton.titleLabel.font = [UIFont systemFontOfSize:24];
-    
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] 
-        initWithTarget:g_floatButton action:@selector(handlePan:)];
-    [g_floatButton addGestureRecognizer:pan];
-    
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] 
-        initWithTarget:g_floatButton action:@selector(handleTap:)];
-    [g_floatButton addGestureRecognizer:tap];
-    
-    UIWindowScene *activeScene = nil;
-    for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-        if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
-            activeScene = scene;
-            break;
-        }
-    }
-    
-    if (activeScene) {
-        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithWindowScene:activeScene];
-        g_overlayWindow.frame = screen;
-    } else {
-        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithFrame:screen];
-    }
-    g_overlayWindow.windowLevel = UIWindowLevelAlert + 100;
-    g_overlayWindow.hidden = NO;
-    g_overlayWindow.backgroundColor = [UIColor clearColor];
-    
-    UIViewController *rootVC = [[UIViewController alloc] init];
-    rootVC.view.backgroundColor = [UIColor clearColor];
-    [rootVC.view addSubview:g_floatButton];
-    g_overlayWindow.rootViewController = rootVC;
-    
-    class_addMethod([g_floatButton class], @selector(handlePan:), 
-                    (IMP)handlePanGesture, "v@:@");
-    class_addMethod([g_floatButton class], @selector(handleTap:), 
-                    (IMP)handleTapGesture, "v@:@");
-}
-
 static void handlePanGesture(UIPanGestureRecognizer *gesture) {
     UIView *btn = gesture.view;
     CGPoint translation = [gesture translationInView:btn.superview];
@@ -111,24 +50,6 @@ static void handlePanGesture(UIPanGestureRecognizer *gesture) {
             btn.center = CGPointMake(x, btn.center.y);
         }];
     }
-}
-
-static UIViewController *findTopViewController(void) {
-    UIViewController *topVC = nil;
-    for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
-        if (scene.activationState == UISceneActivationStateForegroundActive) {
-            for (UIWindow *w in scene.windows) {
-                if (w != g_overlayWindow && w.isKeyWindow) {
-                    topVC = w.rootViewController;
-                    break;
-                }
-            }
-        }
-    }
-    while (topVC && topVC.presentedViewController) {
-        topVC = topVC.presentedViewController;
-    }
-    return topVC;
 }
 
 @interface VCamImagePickerControllerDelegate : NSObject <UINavigationControllerDelegate, UIImagePickerControllerDelegate>
@@ -164,22 +85,31 @@ static UIViewController *findTopViewController(void) {
 
 static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
 
-static void handleTapGesture(UITapGestureRecognizer *gesture) {
-    UIViewController *topVC = findTopViewController();
-    if (!topVC) return;
-    
+@interface VCamActionHandler : NSObject
+@end
+
+@implementation VCamActionHandler
+- (void)onPan:(UIPanGestureRecognizer *)gesture {
+    handlePanGesture(gesture);
+}
+
+- (void)onTap:(id)sender {
+    UIViewController *hostVC = g_overlayWindow.rootViewController;
+    if (!hostVC) return;
+
+    [g_overlayWindow makeKeyAndVisible];
+
     NSString *statusMsg = [NSString stringWithFormat:@"状态: %@ | 模式: %@",
         g_vcamEnabled ? @"已启用" : @"已关闭",
         g_frontOnly ? @"仅替换前置 (后置真机)" : @"前后全部替换"];
-        
-    UIAlertController *alert = [UIAlertController 
-        alertControllerWithTitle:@"VCam" 
+
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"VCam"
         message:statusMsg
         preferredStyle:UIAlertControllerStyleActionSheet];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"选择视频" 
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"选择视频"
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        
         if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeSavedPhotosAlbum]) {
             return;
         }
@@ -187,19 +117,19 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         picker.sourceType = UIImagePickerControllerSourceTypeSavedPhotosAlbum;
         picker.mediaTypes = @[@"public.movie"];
         picker.delegate = g_pickerDelegate;
-        [topVC presentViewController:picker animated:YES completion:nil];
+        [hostVC presentViewController:picker animated:YES completion:nil];
     }]];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:g_frontOnly ? @"切换为: 前后全部替换" : @"切换为: 仅前置替换 (后置真机)"
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         g_frontOnly = !g_frontOnly;
     }]];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机" 
+
+    [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机"
         style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         g_vcamEnabled = !g_vcamEnabled;
         if (g_floatButton) {
-            g_floatButton.backgroundColor = g_vcamEnabled 
+            g_floatButton.backgroundColor = g_vcamEnabled
                 ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9]
                 : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
         }
@@ -209,15 +139,69 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
             [[MediaManager sharedManager] stop];
         }
     }]];
-    
+
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    
-    if (alert.popoverPresentationController) {
-        alert.popoverPresentationController.sourceView = gesture.view;
-        alert.popoverPresentationController.sourceRect = gesture.view.bounds;
+
+    if (alert.popoverPresentationController && g_floatButton) {
+        alert.popoverPresentationController.sourceView = g_floatButton;
+        alert.popoverPresentationController.sourceRect = g_floatButton.bounds;
     }
-    
-    [topVC presentViewController:alert animated:YES completion:nil];
+
+    [hostVC presentViewController:alert animated:YES completion:nil];
+}
+@end
+
+static VCamActionHandler *g_actionHandler = nil;
+
+static void setupFloatButton(void) {
+    if (g_floatButton) return;
+    g_actionHandler = [[VCamActionHandler alloc] init];
+
+    CGFloat btnSize = 50;
+    CGRect screen = [UIScreen mainScreen].bounds;
+
+    g_floatButton = [VCamFloatButton buttonWithType:UIButtonTypeCustom];
+    g_floatButton.frame = CGRectMake(screen.size.width - btnSize - 15, 100, btnSize, btnSize);
+    g_floatButton.layer.cornerRadius = btnSize / 2.0;
+    g_floatButton.layer.shadowColor = [UIColor blackColor].CGColor;
+    g_floatButton.layer.shadowOffset = CGSizeMake(0, 2);
+    g_floatButton.layer.shadowOpacity = 0.3;
+    g_floatButton.layer.shadowRadius = 4;
+    g_floatButton.backgroundColor = g_vcamEnabled
+        ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9]
+        : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
+
+    [g_floatButton setTitle:@"📷" forState:UIControlStateNormal];
+    g_floatButton.titleLabel.font = [UIFont systemFontOfSize:24];
+
+    [g_floatButton addTarget:g_actionHandler action:@selector(onTap:) forControlEvents:UIControlEventTouchUpInside];
+
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
+        initWithTarget:g_actionHandler action:@selector(onPan:)];
+    [g_floatButton addGestureRecognizer:pan];
+
+    UIWindowScene *activeScene = nil;
+    for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+            activeScene = scene;
+            break;
+        }
+    }
+
+    if (activeScene) {
+        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithWindowScene:activeScene];
+        g_overlayWindow.frame = screen;
+    } else {
+        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithFrame:screen];
+    }
+    g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 1000;
+    g_overlayWindow.backgroundColor = [UIColor clearColor];
+
+    UIViewController *rootVC = [[UIViewController alloc] init];
+    rootVC.view.backgroundColor = [UIColor clearColor];
+    [rootVC.view addSubview:g_floatButton];
+    g_overlayWindow.rootViewController = rootVC;
+    g_overlayWindow.hidden = NO;
 }
 
 // ============================================================================
@@ -255,8 +239,6 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
 }
 %end
 
-// Intercept frame delegate callback -> substitute with fake frames
-
 %hook NSObject
 - (void)captureOutput:(AVCaptureOutput *)output 
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
@@ -289,27 +271,26 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
 %end
 
 %hook AVCaptureVideoPreviewLayer
-- (void)setSession:(AVCaptureSession *)session {
-    %orig;
+• (void)setSession:(AVCaptureSession *)session {
+%orig;
 }
 %end
-
 %end
-
+// ============================================================================
+// MARK: - Constructor
+// ============================================================================
 %ctor {
-    @autoreleasepool {
-        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-        
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
-            %init(VCamHooks);
-        }
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
-            dispatch_get_main_queue(), ^{
-                @autoreleasepool {
-                    setupFloatButton();
-                }
-            });
-    }
+@autoreleasepool {
+g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
+NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+if (![bundleID isEqualToString:@"com.apple.springboard"]) {
+%init(VCamHooks);
+}
+dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+dispatch_get_main_queue(), ^{
+@autoreleasepool {
+setupFloatButton();
+}
+});
+}
 }
