@@ -9,7 +9,8 @@ on:
 jobs:
   build:
     name: Build iOS Tweak
-    runs-on: macos-14
+    runs-on: ubuntu-latest
+
     
     steps:
     - name: Checkout
