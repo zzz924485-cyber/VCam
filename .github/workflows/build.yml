@@ -12,16 +12,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies & Prebuilt Theos
+      - name: Setup Theos & SDK (Shallow Clone)
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl fakeroot git perl clang lld unzip xz-utils
-          mkdir -p /home/runner/theos
-          curl -L https://github.com -o theos.tar.xz
-          tar -xf theos.tar.xz -C /home/runner/theos
-          rm -f theos.tar.xz
+          sudo apt-get install -y curl fakeroot git perl clang lld unzip
+          git clone --depth=1 --recursive --shallow-submodules https://github.com /home/runner/theos
           mkdir -p /home/runner/theos/sdks
-          curl -L https://github.com -o sdks.zip
+          curl -fL https://github.com -o sdks.zip
           unzip -q sdks.zip
           mv sdks-master/*.sdk /home/runner/theos/sdks/
           rm -rf sdks.zip sdks-master
