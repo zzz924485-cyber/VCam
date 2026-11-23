@@ -257,3 +257,59 @@ static BOOL isConnectionFromFrontCamera(AVCaptureConnection *connection) {
 
 // Intercept frame delegate callback -> substitute with fake frames
 %hook NSObject
+%hook NSObject
+- (void)captureOutput:(AVCaptureOutput *)output 
+    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
+           fromConnection:(AVCaptureConnection *)connection {
+    
+    if ([output isKindOfClass:[AVCaptureVideoDataOutput class]] &&
+        g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
+        
+        if (g_frontOnly && !isConnectionFromFrontCamera(connection)) {
+            %orig;
+            return;
+        }
+        
+        CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
+        if (fakeFrame) {
+            %orig(output, fakeFrame, connection);
+            CFRelease(fakeFrame);
+            return;
+        }
+    }
+    %orig;
+}
+%end
+
+%hook AVCapturePhotoOutput
+- (void)capturePhotoWithSettings:(AVCapturePhotoSettings *)settings 
+                        delegate:(id<AVCapturePhotoCaptureDelegate>)delegate {
+    %orig;
+}
+%end
+
+%hook AVCaptureVideoPreviewLayer
+- (void)setSession:(AVCaptureSession *)session {
+    %orig;
+}
+%end
+
+%end
+
+%ctor {
+    @autoreleasepool {
+        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
+        
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
+            %init(VCamHooks);
+        }
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
+            dispatch_get_main_queue(), ^{
+                @autoreleasepool {
+                    setupFloatButton();
+                }
+            });
+    }
+}
