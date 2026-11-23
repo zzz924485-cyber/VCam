@@ -13,8 +13,21 @@ static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
 
 // ============================================================================
-// MARK: - 悬浮按钮 UI
+// MARK: - 点击穿透窗口 & 悬浮按钮 UI
 // ============================================================================
+
+@interface VCamPassThroughWindow : UIWindow
+@end
+
+@implementation VCamPassThroughWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hitView = [super hitTest:point withEvent:event];
+    if (hitView == self || hitView == self.rootViewController.view) {
+        return nil;
+    }
+    return hitView;
+}
+@end
 
 @interface VCamFloatButton : UIButton
 @property (nonatomic, assign) CGPoint initialCenter;
@@ -44,7 +57,7 @@ static void setupFloatButton() {
         ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9]
         : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
     
-    [g_floatButton setTitle:@"📷" forState:UIControlStateNormal];
+    [g_floatButton setTitle:@"📷" forState:UIStateNormal];
     g_floatButton.titleLabel.font = [UIFont systemFontOfSize:24];
     
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] 
@@ -55,7 +68,20 @@ static void setupFloatButton() {
         initWithTarget:g_floatButton action:@selector(handleTap:)];
     [g_floatButton addGestureRecognizer:tap];
     
-    g_overlayWindow = [[UIWindow alloc] initWithFrame:screen];
+    UIWindowScene *activeScene = nil;
+    for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+            activeScene = scene;
+            break;
+        }
+    }
+    
+    if (activeScene) {
+        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithWindowScene:activeScene];
+        g_overlayWindow.frame = screen;
+    } else {
+        g_overlayWindow = [[VCamPassThroughWindow alloc] initWithFrame:screen];
+    }
     g_overlayWindow.windowLevel = UIWindowLevelAlert + 100;
     g_overlayWindow.hidden = NO;
     g_overlayWindow.backgroundColor = [UIColor clearColor];
@@ -92,7 +118,7 @@ static UIViewController *findTopViewController(void) {
     for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
         if (scene.activationState == UISceneActivationStateForegroundActive) {
             for (UIWindow *w in scene.windows) {
-                if (w.isKeyWindow) {
+                if (w != g_overlayWindow && w.isKeyWindow) {
                     topVC = w.rootViewController;
                     break;
                 }
