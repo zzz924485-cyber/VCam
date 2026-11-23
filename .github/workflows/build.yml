@@ -12,14 +12,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Theos & SDK
+      - name: Setup Theos, LLD & SDK
         run: |
           sudo apt-get update
           sudo apt-get install -y curl fakeroot git perl clang lld llvm unzip
           GH="https://github.com"
           git clone --depth=1 --recursive --shallow-submodules "$GH/theos/theos.git" /home/runner/theos
-          mkdir -p /home/runner/theos/toolchain/linux/iphone
-          ln -s /usr/bin /home/runner/theos/toolchain/linux/iphone/bin
+          mkdir -p /home/runner/theos/toolchain/linux/iphone/bin
+          for tool in /usr/bin/*; do
+            ln -sf "$tool" "/home/runner/theos/toolchain/linux/iphone/bin/$(basename "$tool")"
+          done
+          ln -sf /usr/bin/ld64.lld /home/runner/theos/toolchain/linux/iphone/bin/ld
+          curl -fL "$GH/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64" -o /home/runner/theos/toolchain/linux/iphone/bin/ldid
+          chmod +x /home/runner/theos/toolchain/linux/iphone/bin/ldid
           mkdir -p /home/runner/theos/sdks
           curl -fL "$GH/theos/sdks/archive/refs/heads/master.zip" -o sdks.zip
           unzip -q sdks.zip
@@ -32,7 +37,7 @@ jobs:
           THEOS_PACKAGE_SCHEME: rootless
         run: |
           make clean || true
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless THEOS_TARGET_LDFLAGS="-fuse-ld=lld"
 
       - name: Upload DEB Artifact
         uses: actions/upload-artifact@v4
