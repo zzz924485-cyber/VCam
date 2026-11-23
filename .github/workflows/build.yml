@@ -15,9 +15,10 @@ jobs:
       - name: Setup Theos, LLD & SDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl fakeroot git perl clang lld llvm unzip
-          REAL_LLD=$(find /usr -name "ld.lld*" 2>/dev/null | head -n 1)
-          sudo ln -sf "$REAL_LLD" /usr/bin/ld64.lld
+          sudo apt-get install -y curl fakeroot git perl clang-14 lld-14 llvm-14 unzip
+          sudo ln -sf /usr/bin/clang-14 /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-14 /usr/bin/clang++
+          sudo ln -sf /usr/bin/lld-14 /usr/bin/ld64.lld
           GH="https://github.com"
           git clone --depth=1 --recursive --shallow-submodules "$GH/theos/theos.git" /home/runner/theos
           mkdir -p /home/runner/theos/toolchain/linux/iphone/bin
