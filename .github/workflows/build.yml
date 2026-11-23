@@ -12,19 +12,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Theos (Official CI Script)
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot git perl clang lld unzip curl
-
-      - name: Setup Theos & iOS SDK
-        run: |
-          git clone --recursive https://github.com ~/theos
-          mkdir -p ~/theos/sdks
-          curl -L https://github.com -o sdks.zip
-          unzip -q sdks.zip
-          mv sdks-master/*.sdk ~/theos/sdks/
-          rm -rf sdks.zip sdks-master
+          sudo apt-get install -y curl sudo fakeroot
+          bash -c "$(curl -fsSL https://githubusercontent.com)"
 
       - name: Build Rootless DEB
         env:
