@@ -41,7 +41,7 @@ jobs:
           SDK="/home/runner/theos/sdks/iPhoneOS16.5.sdk"
           cp "$SDK/usr/lib/libc++.tbd" "$SDK/usr/lib/libstdc++.tbd"
           make clean || true
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless ARCHS="arm64" _THEOS_TARGET_CC="clang -target arm64-apple-ios15.0 -isysroot $SDK" _THEOS_TARGET_CXX="clang++ -target arm64-apple-ios15.0 -isysroot $SDK" _THEOS_TARGET_LDFLAGS="-target arm64-apple-ios15.0 -fuse-ld=/usr/bin/ld64.lld -Wl,-platform_version,ios,15.0,16.5 -isysroot $SDK -L$SDK/usr/lib -F$SDK/System/Library/Frameworks -F$SDK/System/Library/PrivateFrameworks -lc++"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless STRIP=true ARCHS="arm64" _THEOS_TARGET_CC="clang -target arm64-apple-ios15.0 -isysroot $SDK" _THEOS_TARGET_CXX="clang++ -target arm64-apple-ios15.0 -isysroot $SDK" _THEOS_TARGET_LDFLAGS="-target arm64-apple-ios15.0 -fuse-ld=/usr/bin/ld64.lld -Wl,-platform_version,ios,15.0,16.5 -isysroot $SDK -L$SDK/usr/lib -F$SDK/System/Library/Frameworks -F$SDK/System/Library/PrivateFrameworks -lc++"
 
       - name: Upload DEB Artifact
         uses: actions/upload-artifact@v4
