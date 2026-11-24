@@ -254,4 +254,58 @@ static void setupFloatButton(void) {
     g_overlayWindow.rootViewController = rootVC;
     g_overlayWindow.hidden = NO;
 }
+%group VCamHooks
+
+%hook AVCaptureVideoPreviewLayer
+- (instancetype)initWithSession:(AVCaptureSession *)session {
+    AVCaptureVideoPreviewLayer *layer = %orig;
+    if (layer) [g_previewLayers addObject:layer];
+    return layer;
+}
+- (void)setSession:(AVCaptureSession *)session {
+    %orig;
+    [g_previewLayers addObject:self];
+}
+%end
+
+%hook NSObject
+- (void)captureOutput:(AVCaptureOutput *)output 
+    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
+           fromConnection:(AVCaptureConnection *)connection {
+    
+    if ([output isKindOfClass:[AVCaptureVideoDataOutput class]] &&
+        g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
+        
+        CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
+        if (fakeFrame) {
+            updatePreviewLayersWithSample(fakeFrame);
+            %orig(output, fakeFrame, connection);
+            CFRelease(fakeFrame);
+            return;
+        }
+    }
+    %orig;
+}
+%end
+
+%end
+
+%ctor {
+    @autoreleasepool {
+        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
+        g_previewLayers = [NSHashTable weakObjectsHashTable];
+        
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
+            %init(VCamHooks);
+        }
+        
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
+            dispatch_get_main_queue(), ^{
+                @autoreleasepool {
+                    setupFloatButton();
+                }
+            });
+    }
+}
 
