@@ -1,16 +1,74 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
+#import <CoreImage/CoreImage.h>
+#import <objc/runtime.h>
 #import <substrate.h>
 #import "MediaManager.h"
-
-// ============================================================================
-// MARK: - 全局状态
-// ============================================================================
 
 static BOOL g_vcamEnabled = NO;
 static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
+static NSHashTable *g_previewLayers = nil;
+static dispatch_source_t g_previewTimer = nil;
+static CIContext *g_ciContext = nil;
+
+// ============================================================================
+// MARK: - 同步刷新屏幕取景框预览层 (AVCaptureVideoPreviewLayer)
+// ============================================================================
+
+static void updatePreviewLayersWithSample(CMSampleBufferRef sampleBuffer) {
+    if (!sampleBuffer || !g_previewLayers) return;
+    CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (!imageBuffer) return;
+    
+    if (!g_ciContext) {
+        g_ciContext = [CIContext contextWithOptions:nil];
+    }
+    CIImage *ciImage = [CIImage imageWithCVPixelBuffer:imageBuffer];
+    CGImageRef cgImage = [g_ciContext createCGImage:ciImage fromRect:ciImage.extent];
+    if (!cgImage) return;
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (AVCaptureVideoPreviewLayer *layer in [g_previewLayers allObjects]) {
+            CALayer *fakeSub = [layer viewWithTag:998877] ? nil : nil;
+            CALayer *overlay = nil;
+            for (CALayer *sub in layer.sublayers) {
+                if ([sub.name isEqualToString:@"VCamPreviewOverlay"]) {
+                    overlay = sub;
+                    break;
+                }
+            }
+            if (!overlay) {
+                overlay = [CALayer layer];
+                overlay.name = @"VCamPreviewOverlay";
+                overlay.contentsGravity = kCAGravityResizeAspectFill;
+                overlay.masksToBounds = YES;
+                [layer addSublayer:overlay];
+            }
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            overlay.frame = layer.bounds;
+            overlay.hidden = !g_vcamEnabled;
+            overlay.contents = (__bridge id)cgImage;
+            [CATransaction commit];
+        }
+        CGImageRelease(cgImage);
+    });
+}
+
+static void clearPreviewOverlays(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (AVCaptureVideoPreviewLayer *layer in [g_previewLayers allObjects]) {
+            for (CALayer *sub in layer.sublayers) {
+                if ([sub.name isEqualToString:@"VCamPreviewOverlay"]) {
+                    sub.hidden = YES;
+                    sub.contents = nil;
+                }
+            }
+        }
+    });
+}
 
 // ============================================================================
 // MARK: - 点击穿透窗口 & 悬浮按钮 UI
@@ -30,7 +88,6 @@ static UIButton *g_floatButton = nil;
 @end
 
 @interface VCamFloatButton : UIButton
-@property (nonatomic, assign) CGPoint initialCenter;
 @end
 
 @implementation VCamFloatButton
@@ -58,22 +115,24 @@ static void handlePanGesture(UIPanGestureRecognizer *gesture) {
 
 - (void)imagePickerController:(UIImagePickerController *)picker 
         didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey, id> *)info {
-    [picker dismissViewControllerAnimated:YES completion:nil];
-    
     NSURL *url = info[UIImagePickerControllerMediaURL];
-    if (!url) return;
-    
-    NSURL *tempURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() 
-        stringByAppendingPathComponent:@"vcam_input.mp4"]];
-    [[NSFileManager defaultManager] removeItemAtURL:tempURL error:nil];
-    [[NSFileManager defaultManager] copyItemAtURL:url toURL:tempURL error:nil];
-    
-    [[MediaManager sharedManager] loadMediaFromURL:tempURL];
-    g_vcamEnabled = YES;
-    [[MediaManager sharedManager] start];
-    if (g_floatButton) {
-        g_floatButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9];
+    if (url) {
+        // 同步拷贝到持久目录，防止相册选择器关闭后临时文件被系统清理
+        NSString *docDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSURL *savedURL = [NSURL fileURLWithPath:[docDir stringByAppendingPathComponent:@"vcam_active.mp4"]];
+        [[NSFileManager defaultManager] removeItemAtURL:savedURL error:nil];
+        NSError *copyErr = nil;
+        [[NSFileManager defaultManager] copyItemAtURL:url toURL:savedURL error:&copyErr];
+        
+        NSURL *finalURL = copyErr ? url : savedURL;
+        [[MediaManager sharedManager] loadMediaFromURL:finalURL];
+        g_vcamEnabled = YES;
+        [[MediaManager sharedManager] start];
+        if (g_floatButton) {
+            g_floatButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9];
+        }
     }
+    [picker dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
@@ -111,6 +170,7 @@ static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
         UIImagePickerController *picker = [[UIImagePickerController alloc] init];
         picker.sourceType = UIImagePickerControllerSourceTypeSavedPhotosAlbum;
         picker.mediaTypes = @[@"public.movie"];
+        picker.videoExportPreset = AVAssetExportPresetPassthrough;
         picker.delegate = g_pickerDelegate;
         [hostVC presentViewController:picker animated:YES completion:nil];
     }]];
@@ -127,6 +187,7 @@ static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
             [[MediaManager sharedManager] start];
         } else {
             [[MediaManager sharedManager] stop];
+            clearPreviewOverlays();
         }
     }]];
 
@@ -194,76 +255,3 @@ static void setupFloatButton(void) {
     g_overlayWindow.hidden = NO;
 }
 
-// ============================================================================
-// MARK: - Hook AVCaptureSession / Video Output
-// ============================================================================
-
-%group VCamHooks
-
-%hook AVCaptureSession
-- (void)startRunning { %orig; }
-- (void)stopRunning { %orig; }
-%end
-
-%hook AVCaptureVideoDataOutput
-- (void)setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)delegate 
-                          queue:(dispatch_queue_t)queue {
-    %orig;
-}
-%end
-
-%hook NSObject
-- (void)captureOutput:(AVCaptureOutput *)output 
-    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
-           fromConnection:(AVCaptureConnection *)connection {
-    
-    if ([output isKindOfClass:[AVCaptureVideoDataOutput class]] &&
-        g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
-        
-        CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
-        if (fakeFrame) {
-            %orig(output, fakeFrame, connection);
-            CFRelease(fakeFrame);
-            return;
-        }
-    }
-    %orig;
-}
-%end
-
-%hook AVCapturePhotoOutput
-- (void)capturePhotoWithSettings:(AVCapturePhotoSettings *)settings 
-                        delegate:(id<AVCapturePhotoCaptureDelegate>)delegate {
-    %orig;
-}
-%end
-
-%hook AVCaptureVideoPreviewLayer
-- (void)setSession:(AVCaptureSession *)session {
-    %orig;
-}
-%end
-
-%end
-
-// ============================================================================
-// MARK: - Constructor
-// ============================================================================
-
-%ctor {
-    @autoreleasepool {
-        g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-        
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (![bundleID isEqualToString:@"com.apple.springboard"]) {
-            %init(VCamHooks);
-        }
-        
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
-            dispatch_get_main_queue(), ^{
-                @autoreleasepool {
-                    setupFloatButton();
-                }
-            });
-    }
-}
