@@ -31,7 +31,7 @@ static void updatePreviewLayersWithSample(CMSampleBufferRef sampleBuffer) {
     
     dispatch_async(dispatch_get_main_queue(), ^{
         for (AVCaptureVideoPreviewLayer *layer in [g_previewLayers allObjects]) {
-            CALayer *fakeSub = [layer viewWithTag:998877] ? nil : nil;
+
             CALayer *overlay = nil;
             for (CALayer *sub in layer.sublayers) {
                 if ([sub.name isEqualToString:@"VCamPreviewOverlay"]) {
